@@ -33,7 +33,7 @@ const TC_DEFAULT_CLASSID = 0xfffd;
 const WAN_DEFAULT_CLASSID = 0xfffe;
 const GLOBAL_UP_QID = 31;
 /* Not a queue: the tag that keeps a flow off the accelerator. */
-const HNAT_EXCEPTION_MARK = 0x99;
+const HNAT_EXCEPTION_BIT = 0x80;
 const GLOBAL_DL_QID = 62;
 const DL_QID_OFFSET = 31;
 const UP_SCH = 2;
@@ -590,10 +590,10 @@ const methods = {
 			for (let mark in marks.marks) {
 				let m = int(mark);
 
-				/* The exclusion tag is not a queue id. Run through the same
-				 * arithmetic it came out as slot 122, a queue nothing owns,
-				 * and its bytes were filed under it. */
-				if (m == HNAT_EXCEPTION_MARK)
+				/* The exclusion tag is not a queue id. HNAT tests bit 7, so any
+				 * mark carrying it is excluded; run through the same arithmetic
+				 * it would land in a slot nothing owns. */
+				if (m & HNAT_EXCEPTION_BIT)
 					continue;
 
 				let slot = (m > DL_QID_OFFSET) ? m - DL_QID_OFFSET : m;
