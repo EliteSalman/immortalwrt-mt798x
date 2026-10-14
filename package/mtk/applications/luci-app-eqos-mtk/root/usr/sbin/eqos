@@ -40,7 +40,8 @@ CHAIN_NAME="forward"
 CHAIN_GLOBAL="forward_global"
 MARK_CLEAR_MASK="0xffff0000"
 QUEUE_MARK_MASK="0x0000ffff"
-HNAT_EXCEPTION_MARK="0x99"
+# HNAT tests bit 7 rather than an exact mark value.
+HNAT_EXCEPTION_BIT="0x80"
 HNAT_RESTART_DELAY=3
 
 QDMA_QUEUE_COUNT=64
@@ -440,17 +441,17 @@ table $TABLE_FAMILY $TABLE_NAME {
 EOF
 
 	"$NFT" add rule "$TABLE_FAMILY" "$TABLE_NAME" "$CHAIN_NAME" \
-		iifname "$dev" meta mark != "$HNAT_EXCEPTION_MARK" \
+		iifname "$dev" meta mark '&' "$HNAT_EXCEPTION_BIT" == 0 \
 		meta mark set meta mark '&' "$MARK_CLEAR_MASK" || return 1
 	"$NFT" add rule "$TABLE_FAMILY" "$TABLE_NAME" "$CHAIN_NAME" \
-		oifname "$dev" meta mark != "$HNAT_EXCEPTION_MARK" \
+		oifname "$dev" meta mark '&' "$HNAT_EXCEPTION_BIT" == 0 \
 		meta mark set meta mark '&' "$MARK_CLEAR_MASK" || return 1
 
 	# Catch-all for traffic that no device rule claimed. This chain runs at a
 	# later hook priority than $CHAIN_NAME, so it always sees the final mark
 	# regardless of when add_rule appends its per-device rules. Flows that
 	# already carry a queue id keep it, and the software-shaped flows tagged
-	# with $HNAT_EXCEPTION_MARK are skipped because their mark is non-zero.
+	# with $HNAT_EXCEPTION_BIT are skipped because their mark is non-zero.
 	# $dev is excluded on both sides so bridged LAN-to-LAN traffic is not
 	# accounted as download.
 	"$NFT" add rule "$TABLE_FAMILY" "$TABLE_NAME" "$CHAIN_GLOBAL" \
@@ -802,7 +803,7 @@ nft_addr_rule() {
 		*) return 1 ;;
 	esac
 
-	[ "$guarded" != "1" ] || guard="meta mark != $HNAT_EXCEPTION_MARK"
+	[ "$guarded" != "1" ] || guard="meta mark & $HNAT_EXCEPTION_BIT == 0"
 
 	"$NFT" add rule "$TABLE_FAMILY" "$TABLE_NAME" "$CHAIN_NAME" \
 		"$family" "$addr" "$value" $guard counter meta mark set "$mark"
@@ -813,7 +814,7 @@ nft_mark_rule() {
 }
 
 nft_exception_rule() {
-	nft_addr_rule "$1" "$2" "$3" "$HNAT_EXCEPTION_MARK" 0
+	nft_addr_rule "$1" "$2" "$3" "$HNAT_EXCEPTION_BIT" 0
 }
 
 # The exception tag and the class in one rule. htb_classify reads skb->priority
@@ -843,7 +844,7 @@ nft_class_rule() {
 
 	"$NFT" add rule "$TABLE_FAMILY" "$TABLE_NAME" "$CHAIN_NAME" \
 		"$family" "$addr" "$value" counter \
-		meta mark set "$HNAT_EXCEPTION_MARK" \
+		meta mark set "$HNAT_EXCEPTION_BIT" \
 		meta priority set "1:$classid"
 }
 
@@ -1180,13 +1181,13 @@ nft_traffic_emit() {
 	# rule left to override, say every HTTPS connection, empties every
 	# per-device limit on the router. So the class is claimed only when the
 	# rule was told to, and otherwise the device keeps what it already had.
-	[ "$override" = "1" ] || guard="meta mark != $HNAT_EXCEPTION_MARK"
+	[ "$override" = "1" ] || guard="meta mark & $HNAT_EXCEPTION_BIT == 0"
 
 	"$NFT" add rule "$TABLE_FAMILY" "$TABLE_NAME" "$CHAIN_NAME" \
 		$sel $match $guard counter meta priority set "1:$classid" || return 1
 
 	"$NFT" add rule "$TABLE_FAMILY" "$TABLE_NAME" "$CHAIN_NAME" \
-		$sel $match meta mark != "$HNAT_EXCEPTION_MARK" \
+		$sel $match meta mark '&' "$HNAT_EXCEPTION_BIT" == 0 \
 		meta mark set "$qid" || return 1
 }
 
